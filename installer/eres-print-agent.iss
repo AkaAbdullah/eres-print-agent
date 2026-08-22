@@ -1,0 +1,46 @@
+; Inno Setup script — builds the customer-facing Windows installer.
+;
+; Compile ON WINDOWS with Inno Setup 6 (https://jrsoftware.org/isinfo.php),
+; after installer/build_exe.spec has produced dist/eres-print-agent.exe:
+;   ISCC.exe installer\eres-print-agent.iss
+;
+; Cannot be compiled/tested from macOS. See installer/post-install-verify.md
+; for the manual checklist to run on a real Windows machine after this
+; produces ERESPrintAgentSetup.exe.
+
+#define MyAppName "ERES Print Agent"
+#define MyAppVersion "1.0.0"
+#define MyAppPublisher "ERES"
+#define MyAppExeName "eres-print-agent.exe"
+
+[Setup]
+AppId={{B7E2C6A0-1F3E-4B8A-9C7A-ERESPRINTAGENT}}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+DefaultDirName={autopf}\ERES Print Agent
+DisableProgramGroupPage=yes
+; Requires elevation: installing a Windows Service needs admin rights.
+PrivilegesRequired=admin
+OutputBaseFilename=ERESPrintAgentSetup
+Compression=lzma
+SolidCompression=yes
+ArchitecturesInstallIn64BitMode=x64
+
+[Files]
+Source: "..\dist\eres-print-agent.exe"; DestDir: "{app}"; Flags: ignoreversion
+; SumatraPDF.exe (bundled separately, not built by this repo — see
+; printing/windows.py's docstring) must be placed here before compiling:
+Source: "SumatraPDF.exe"; DestDir: "{app}"; Flags: ignoreversion
+; %ProgramData%\ERES\PrintAgent is created by the agent itself on first run,
+; not by the installer.
+
+[Run]
+; Installs + auto-starts the Windows Service (see service/windows_service.py's
+; install_service(), which also configures `sc failure` auto-restart).
+; Pairing (`eres-print-agent pair <code>`) is left to the operator afterward —
+; there is nothing else for this installer to configure (spec section 33/42).
+Filename: "{app}\{#MyAppExeName}"; Parameters: "install"; StatusMsg: "Installing ERES Print Agent service..."; Flags: runhidden
+
+[UninstallRun]
+Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; RunOnceId: "StopService"; Flags: runhidden
