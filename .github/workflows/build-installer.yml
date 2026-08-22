@@ -11,6 +11,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write # needed for softprops/action-gh-release to create the release + upload the asset
+
 jobs:
   build:
     runs-on: windows-latest
