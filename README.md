@@ -119,6 +119,26 @@ exercised by running this on macOS, since `keyring` uses the same API surface on
 - Logs are redacted (`logging_setup.py`) for `agentSecret` and `Authorization` headers; no
   document contents are ever logged.
 
+## Building the Windows installer
+
+Handled by `.github/workflows/build-installer.yml` on a `windows-latest` GitHub Actions
+runner — that's the only environment PyInstaller/pywin32/Inno Setup can actually produce a
+working artifact on. Two ways to trigger it:
+
+- **Manual**: Actions tab → "Build Windows Installer" → Run workflow. Artifact appears
+  under the run's Artifacts section.
+- **Tagged release**: `git tag v1.0.0 && git push origin v1.0.0` — also attaches
+  `ERESPrintAgentSetup.exe` to a GitHub Release automatically.
+
+The workflow downloads SumatraPDF (bundled for actual PDF printing — see
+`printing/windows.py`'s docstring) and checks it against a SHA256 pinned in the workflow
+file, computed by hand at the time it was added, since SumatraPDF doesn't publish an
+official checksum. A mismatch fails the build rather than silently bundling whatever the
+URL currently serves.
+
+For a one-off local build instead, `scripts/build_windows.ps1` does the same steps — run it
+on an actual Windows machine (see the script's own header for prerequisites).
+
 ## What cannot be verified from macOS
 
 - `service/windows_service.py`: real Windows Service install/start/stop/crash-restart, and
@@ -126,8 +146,9 @@ exercised by running this on macOS, since `keyring` uses the same API surface on
 - `printing/windows.py`: real `win32print` discovery/status/printing against a physical or
   virtual Windows printer.
 - `credentials.py`'s Windows keyring backend (Credential Locker) specifically.
-- `installer/`: compiling the PyInstaller exe and the Inno Setup installer, and everything
-  in `installer/post-install-verify.md`.
+- CI (`.github/workflows/build-installer.yml`) verifies the installer *compiles*, but not
+  that it *works* — actually running it, installing the service, and everything in
+  `installer/post-install-verify.md` still needs a human on a real Windows machine.
 
 Everything else — the full WS protocol round trip, SQLite queue behavior, reconnect/backoff
 timing, and the CLI's non-service commands — has been exercised end-to-end against
