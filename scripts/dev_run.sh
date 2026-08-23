@@ -22,7 +22,7 @@ export ERES_PRINT_AGENT_ALLOW_INSECURE_HTTP="${ERES_PRINT_AGENT_ALLOW_INSECURE_H
 
 if [ "${1:-}" = "pair" ]; then
   shift
-  ./.venv/bin/eres-print-agent pair "$@" --web-url "${DEV_WEB_URL:-http://localhost:3101}"
+  ./.venv/bin/eres-print-agent pair "$@" --web-url "${DEV_WEB_URL:-http://localhost:3001}"
 else
   exec ./.venv/bin/eres-print-agent "$@"
 fi
