@@ -34,6 +34,7 @@ a = Analysis(
         "win32print",
         "win32con",
         "win32cred",
+        "win32crypt",  # DPAPI machine-scope storage for the agent secret
         "keyring.backends.Windows",
     ],
     hookspath=[],

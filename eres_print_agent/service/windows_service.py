@@ -64,8 +64,12 @@ class ERESPrintAgentService(win32serviceutil.ServiceFramework if sys.platform ==
 
         if not config.is_paired or not agent_secret:
             servicemanager.LogErrorMsg(
-                "ERES Print Agent is not paired. On this machine, run: "
-                "eres-print-agent pair <code from ERES Settings > Printers>"
+                "ERES Print Agent has no usable credential, so it cannot start. "
+                f"Paired: {config.is_paired}; credential readable: {agent_secret is not None}. "
+                "If it is paired but the credential is unreadable, the secret was "
+                "saved for a different account than this service runs as — re-run "
+                "`eres-print-agent pair <code from ERES Settings > Printers>` with "
+                "a build that stores it machine-wide."
             )
             # Report started-then-stopped rather than crash-looping — an
             # unpaired install is a normal, expected state right after
