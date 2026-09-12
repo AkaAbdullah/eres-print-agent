@@ -9,7 +9,7 @@
 
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -19,6 +19,9 @@ a = Analysis(
     binaries=[],
     datas=[
         ("../eres_print_agent/db/schema.sql", "eres_print_agent/db"),
+        # cacert.pem must be in the bundle — certifi.where() points at a real
+        # file on disk, and TLS verification fails without it.
+        *collect_data_files("certifi"),
     ],
     hiddenimports=[
         # Ship the whole package explicitly. The entry script only imports

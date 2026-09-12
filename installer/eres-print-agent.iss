@@ -9,7 +9,7 @@
 ; produces ERESPrintAgentSetup.exe.
 
 #define MyAppName "ERES Print Agent"
-#define MyAppVersion "1.0.8"
+#define MyAppVersion "1.0.9"
 #define MyAppPublisher "ERES"
 #define MyAppExeName "eres-print-agent.exe"
 

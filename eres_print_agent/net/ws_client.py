@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
+from functools import lru_cache
 from typing import Awaitable, Callable, List, Optional
 
+import certifi
 import websockets
 from websockets.exceptions import ConnectionClosed
 
@@ -36,6 +39,25 @@ logger = logging.getLogger(__name__)
 OnAuthenticated = Callable[[AgentAuthenticated], Awaitable[None]]
 OnInboundMessage = Callable[[InboundHubMessage], Awaitable[None]]
 OnDisconnected = Callable[[], Awaitable[None]]
+
+
+@lru_cache(maxsize=1)
+def _certifi_context() -> ssl.SSLContext:
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+def _ssl_context(hub_url: str) -> Optional[ssl.SSLContext]:
+    """Verify against certifi's bundle rather than the OS trust store.
+
+    The hub's Let's Encrypt chain terminates at ISRG Root X2, which plenty of
+    Windows 10 installs do not carry, and a service running as LocalSystem
+    does not pick up Windows' automatic root updates — so the default context
+    fails with CERTIFICATE_VERIFY_FAILED and the agent can never connect.
+    certifi ships the Mozilla bundle, which has that root.
+    """
+    if not hub_url.startswith("wss://"):
+        return None
+    return _certifi_context()
 
 
 class WsClient:
@@ -118,7 +140,9 @@ class WsClient:
 
         while not self._stop_event.is_set():
             try:
-                async with websockets.connect(self.hub_url, open_timeout=15) as socket:
+                async with websockets.connect(
+                    self.hub_url, open_timeout=15, ssl=_ssl_context(self.hub_url)
+                ) as socket:
                     self._socket = socket
                     authenticated = await self._authenticate(socket)
 

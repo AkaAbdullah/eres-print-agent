@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eres-print-agent"
-version = "1.0.8"
+version = "1.0.9"
 description = "ERES Print Agent — terminal/service-based background printer bridge for ERES."
 requires-python = ">=3.9"
 dependencies = [
@@ -12,6 +12,9 @@ dependencies = [
     "websockets>=12,<13",
     "keyring>=24,<26",
     "httpx>=0.27,<1",
+    # Direct, not just via httpx: ws_client verifies TLS against this bundle
+    # instead of the OS trust store.
+    "certifi",
 ]
 
 [project.optional-dependencies]
