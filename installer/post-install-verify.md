@@ -22,22 +22,26 @@ Expect three `RESTART` actions with 5000ms delays (configured by
 
 ## 3. Pairing
 
-The installer now appends `{app}` to the machine `Path` (see `[Registry]` in
-`eres-print-agent.iss`), so a **new terminal opened after install** should resolve
-the bare command. Open a fresh `cmd`/PowerShell window (PATH changes don't apply
-to windows already open) and confirm:
+ERES Settings > Printers hands the operator the **full-path** form, which works
+regardless of PATH state:
 
 ```powershell
-eres-print-agent pair <code-from-ERES-Settings-Printers>
-eres-print-agent restart
-eres-print-agent status
+"C:\Program Files\ERES Print Agent\eres-print-agent.exe" pair <code-from-ERES-Settings-Printers>
 ```
 Expect `Connection: connected` and `Paired: Yes` within a few seconds.
 
-If it still reports "not recognized," the terminal was opened before install
-completed, or a broadcast of the `WM_SETTINGCHANGE` message didn't reach it —
-a reboot is the reliable fallback. As a one-off workaround it also works with
-the full path: `"C:\Program Files\ERES Print Agent\eres-print-agent.exe" pair <code>`.
+The installer also appends `{app}` to the machine `Path` (see `[Registry]` in
+`eres-print-agent.iss`), so the bare command should work too — but only in a
+terminal opened *after* install, and Windows often needs a sign-out or reboot
+before the change propagates to newly spawned shells. Verify both forms:
+
+```powershell
+eres-print-agent status
+eres-print-agent restart
+```
+If the bare form reports "not recognized" in a brand-new terminal after a
+reboot, the PATH entry did not apply — investigate before shipping, since the
+full-path form above will still mask the problem for pairing.
 
 ## 4. Printer discovery
 
