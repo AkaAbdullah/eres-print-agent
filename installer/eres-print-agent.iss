@@ -35,6 +35,14 @@ Source: "SumatraPDF.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; %ProgramData%\ERES\PrintAgent is created by the agent itself on first run,
 ; not by the installer.
 
+[Registry]
+; Appends {app} to the machine PATH so `eres-print-agent` resolves from any
+; terminal, matching the bare command shown in Settings > Printers
+; (printers-manager.tsx) instead of requiring the full install path.
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
+    ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
+    Check: NeedsAddPath('{app}')
+
 [Run]
 ; Installs + auto-starts the Windows Service (see service/windows_service.py's
 ; install_service(), which also configures `sc failure` auto-restart).
@@ -44,3 +52,48 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "install"; StatusMsg: "Installing
 
 [UninstallRun]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; RunOnceId: "StopService"; Flags: runhidden
+
+[Code]
+function NeedsAddPath(Param: string): boolean;
+var
+  OrigPath: string;
+begin
+  if not RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
+    'Path', OrigPath) then
+  begin
+    Result := True;
+    exit;
+  end;
+  { Only add if {app} isn't already a substring of the PATH (avoids duplicates
+    on repair/reinstall). }
+  Result := Pos(';' + Uppercase(Param) + ';', ';' + Uppercase(OrigPath) + ';') = 0;
+end;
+
+procedure RemovePath(Path: string);
+var
+  Paths: string;
+  P: Integer;
+begin
+  if not RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
+    'Path', Paths) then
+    exit;
+
+  P := Pos(';' + Uppercase(Path) + ';', ';' + Uppercase(Paths) + ';');
+  if P = 0 then
+  begin
+    { Path may be at the very start or very end without a matching semicolon
+      on one side; the leading/trailing ';' padding above already handles
+      that, so P = 0 here means it's genuinely absent. }
+    exit;
+  end;
+
+  Delete(Paths, P - 1, Length(Path) + 1);
+  RegWriteStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
+    'Path', Paths);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RemovePath(ExpandConstant('{app}'));
+end;
