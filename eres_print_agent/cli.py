@@ -47,8 +47,24 @@ def cmd_pair(args: argparse.Namespace) -> int:
         return 1
 
     print(f"Paired as agent {result.agent_id}.")
-    print("Run `eres-print-agent install` (Windows) to run this as a background service,")
-    print("or `eres-print-agent run` to run it in the foreground for now.")
+
+    if sys.platform != "win32":
+        print("Run `eres-print-agent run` to run it in the foreground.")
+        return 0
+
+    # The installer already registered the service, and SvcDoRun reads the
+    # config once at startup — so what it needs now is a restart to pick up
+    # the credentials pairing just wrote, not a fresh `install`.
+    from .service.windows_service import service_exists
+
+    if service_exists():
+        print("Almost done — restart the service so it picks up these credentials.")
+        print("In an Administrator Command Prompt, run:")
+        print("  eres-print-agent restart")
+    else:
+        print("The background service isn't installed yet.")
+        print("In an Administrator Command Prompt, run:")
+        print("  eres-print-agent install")
     return 0
 
 
@@ -263,10 +279,31 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# These five talk to the Service Control Manager, which refuses a
+# non-elevated caller. Everything else (pair, status, printers, logs) is
+# fine as a normal user.
+_SERVICE_COMMANDS = frozenset({"install", "uninstall", "start", "stop", "restart"})
+_ERROR_ACCESS_DENIED = 5
+
+
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except Exception as exc:
+        # Without this the operator gets a raw pywin32 traceback
+        # ("pywintypes.error: (5, 'OpenSCManager', 'Access is denied.')")
+        # that doesn't say the one thing they need to do.
+        if args.command not in _SERVICE_COMMANDS or getattr(exc, "winerror", None) != _ERROR_ACCESS_DENIED:
+            raise
+        print(
+            f"Access denied. `eres-print-agent {args.command}` manages a Windows service,\n"
+            "which needs an elevated prompt: right-click Command Prompt, choose\n"
+            '"Run as administrator", then run the command again.',
+            file=sys.stderr,
+        )
+        return 1
 
 
 if __name__ == "__main__":

@@ -112,6 +112,16 @@ def _configure_auto_restart() -> None:
     )
 
 
+def service_exists() -> bool:
+    """Querying status needs only read access, so this works unelevated —
+    unlike every other call in this module."""
+    try:
+        win32serviceutil.QueryServiceStatus(SERVICE_NAME)
+    except Exception:
+        return False
+    return True
+
+
 def install_service() -> None:
     win32serviceutil.InstallService(
         pythonClassString=f"{__name__}.ERESPrintAgentService",
