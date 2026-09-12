@@ -9,7 +9,7 @@
 ; produces ERESPrintAgentSetup.exe.
 
 #define MyAppName "ERES Print Agent"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "ERES"
 #define MyAppExeName "eres-print-agent.exe"
 
@@ -64,8 +64,8 @@ begin
     Result := True;
     exit;
   end;
-  { Only add if {app} isn't already a substring of the PATH (avoids duplicates
-    on repair/reinstall). }
+  // Only add if the install dir isn't already a substring of the PATH
+  // (avoids duplicates on repair/reinstall).
   Result := Pos(';' + Uppercase(Param) + ';', ';' + Uppercase(OrigPath) + ';') = 0;
 end;
 
@@ -81,9 +81,9 @@ begin
   P := Pos(';' + Uppercase(Path) + ';', ';' + Uppercase(Paths) + ';');
   if P = 0 then
   begin
-    { Path may be at the very start or very end without a matching semicolon
-      on one side; the leading/trailing ';' padding above already handles
-      that, so P = 0 here means it's genuinely absent. }
+    // Path may be at the very start or very end without a matching semicolon
+    // on one side; the leading/trailing ';' padding above already handles
+    // that, so P = 0 here means it's genuinely absent.
     exit;
   end;
 
