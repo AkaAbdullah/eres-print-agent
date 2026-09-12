@@ -9,6 +9,8 @@
 
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_submodules
+
 block_cipher = None
 
 a = Analysis(
@@ -19,6 +21,11 @@ a = Analysis(
         ("../eres_print_agent/db/schema.sql", "eres_print_agent/db"),
     ],
     hiddenimports=[
+        # Ship the whole package explicitly. The entry script only imports
+        # eres_print_agent.cli directly, and a module reached solely through a
+        # deferred import (e.g. printing.windows, service.windows_service)
+        # would otherwise risk being dropped from the bundle.
+        *collect_submodules("eres_print_agent"),
         "win32timezone",  # pywin32 service framework pulls this in lazily
         "servicemanager",
         "win32serviceutil",
