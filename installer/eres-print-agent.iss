@@ -9,7 +9,7 @@
 ; produces ERESPrintAgentSetup.exe.
 
 #define MyAppName "ERES Print Agent"
-#define MyAppVersion "1.0.9"
+#define MyAppVersion "1.0.10"
 #define MyAppPublisher "ERES"
 #define MyAppExeName "eres-print-agent.exe"
 
@@ -49,11 +49,30 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environmen
 ; Pairing (`eres-print-agent pair <code>`) is left to the operator afterward —
 ; there is nothing else for this installer to configure (spec section 33/42).
 Filename: "{app}\{#MyAppExeName}"; Parameters: "install"; StatusMsg: "Installing ERES Print Agent service..."; Flags: runhidden
+; On an upgrade `install` fails because the service already exists, and
+; PrepareToInstall has just stopped it — so start it explicitly, or the
+; upgrade would leave a working install sitting there stopped.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "start"; StatusMsg: "Starting ERES Print Agent service..."; Flags: runhidden
 
 [UninstallRun]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; RunOnceId: "StopService"; Flags: runhidden
 
 [Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Result := '';
+  // The running service holds eres-print-agent.exe open, so upgrading over
+  // it fails with "DeleteFile failed; code 5. Access is denied." Stop it
+  // before any file is copied. `sc stop` returns once the request is
+  // accepted rather than once the process has exited, so give the SCM a
+  // few seconds to actually release the handle.
+  if Exec(ExpandConstant('{sys}\sc.exe'), 'stop ERESPrintAgent', '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode) then
+    Sleep(5000);
+end;
+
 function NeedsAddPath(Param: string): boolean;
 var
   OrigPath: string;
