@@ -286,7 +286,27 @@ _SERVICE_COMMANDS = frozenset({"install", "uninstall", "start", "stop", "restart
 _ERROR_ACCESS_DENIED = 5
 
 
+def _looks_like_scm_launch(argv) -> bool:
+    """The SCM starts a frozen service by running its exe with no arguments."""
+    return (
+        argv is None
+        and sys.platform == "win32"
+        and getattr(sys, "frozen", False)
+        and len(sys.argv) == 1
+    )
+
+
 def main(argv=None) -> int:
+    # Before argparse: a no-argument frozen launch is how the SCM starts the
+    # service, and argparse would exit(2) on the missing subcommand without
+    # ever answering the SCM, which then times out with error 1053.
+    if _looks_like_scm_launch(argv):
+        from .service.windows_service import run_service_dispatcher
+
+        if run_service_dispatcher():
+            return 0
+        # Not actually started by the SCM — fall through and show usage.
+
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

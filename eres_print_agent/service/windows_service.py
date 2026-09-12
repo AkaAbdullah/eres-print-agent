@@ -122,6 +122,32 @@ def service_exists() -> bool:
     return True
 
 
+_ERROR_FAILED_SERVICE_CONTROLLER_CONNECT = 1063
+
+
+def run_service_dispatcher() -> bool:
+    """Hand this process to the SCM as the service host.
+
+    In a frozen build there is no pythonservice.exe, so pywin32 registers
+    this exe itself as the service ImagePath and the SCM launches it with no
+    arguments. Something must then answer the SCM within its ~30s timeout or
+    it reports "error 1053: the service did not respond to the start or
+    control request in a timely fashion".
+
+    Returns False when the process was not started by the SCM at all (a bare
+    double-click, say), so the caller can fall back to the CLI.
+    """
+    servicemanager.Initialize()
+    servicemanager.PrepareToHostSingle(ERESPrintAgentService)
+    try:
+        servicemanager.StartServiceCtrlDispatcher()
+    except win32service.error as exc:
+        if exc.winerror == _ERROR_FAILED_SERVICE_CONTROLLER_CONNECT:
+            return False
+        raise
+    return True
+
+
 def install_service() -> None:
     win32serviceutil.InstallService(
         pythonClassString=f"{__name__}.ERESPrintAgentService",
@@ -129,6 +155,9 @@ def install_service() -> None:
         displayName=SERVICE_DISPLAY_NAME,
         description=SERVICE_DESCRIPTION,
         startType=win32service.SERVICE_AUTO_START,
+        # Explicit rather than letting pywin32 look for pythonservice.exe,
+        # which a frozen build does not ship.
+        exeName=sys.executable if getattr(sys, "frozen", False) else None,
     )
     _configure_auto_restart()
 
