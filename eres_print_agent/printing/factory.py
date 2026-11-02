@@ -24,7 +24,11 @@ def build_printer_manager(mock_output_dir: Path | None = None) -> PrinterManager
 
         return WindowsPrinterManager()
 
-    # macOS/Linux: no supported backend yet (spec section 45 — V1 is
-    # Windows-first). Falling back to the mock keeps the rest of the agent
-    # runnable for development rather than crashing at startup.
+    if sys.platform == "darwin":
+        from .macos import MacPrinterManager
+
+        return MacPrinterManager()
+
+    # Linux: no supported backend yet. Falling back to the mock keeps the
+    # rest of the agent runnable for development rather than crashing.
     return MockPrinterManager(mock_output_dir or Path.cwd() / "mock-print-output")

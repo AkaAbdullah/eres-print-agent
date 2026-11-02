@@ -13,10 +13,13 @@ from .status_store import read_status
 
 
 def _service_status() -> str:
-    if sys.platform != "win32":
-        return "n/a (not Windows)"
+    if sys.platform not in ("win32", "darwin"):
+        return "n/a (not Windows or macOS)"
     try:
-        from .service.windows_service import query_service_status
+        if sys.platform == "darwin":
+            from .service.macos_service import query_service_status
+        else:
+            from .service.windows_service import query_service_status
 
         return query_service_status()
     except Exception as error:

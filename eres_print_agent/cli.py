@@ -21,10 +21,19 @@ from .diagnostics import collect_printers, collect_status, format_printers_text,
 from .logging_setup import configure_logging
 
 
-def _require_windows(command: str) -> None:
-    if sys.platform != "win32":
-        print(f"`{command}` is only available on Windows (this manages the Windows Service).", file=sys.stderr)
-        sys.exit(1)
+def _service_module(command: str):
+    """The background-service backend for this OS: a Windows Service, or a
+    launchd LaunchAgent on macOS."""
+    if sys.platform == "win32":
+        from .service import windows_service
+
+        return windows_service
+    if sys.platform == "darwin":
+        from .service import macos_service
+
+        return macos_service
+    print(f"`{command}` is only available on Windows and macOS.", file=sys.stderr)
+    sys.exit(1)
 
 
 def _print_json(data) -> None:
@@ -48,23 +57,31 @@ def cmd_pair(args: argparse.Namespace) -> int:
 
     print(f"Paired as agent {result.agent_id}.")
 
-    if sys.platform != "win32":
+    if args.no_service or sys.platform not in ("win32", "darwin"):
         print("Run `eres-print-agent run` to run it in the foreground.")
         return 0
 
-    # The installer already registered the service, and SvcDoRun reads the
-    # config once at startup — so what it needs now is a restart to pick up
-    # the credentials pairing just wrote, not a fresh `install`.
-    from .service.windows_service import service_exists
+    # The service reads the credentials once at startup, so (re)start it now
+    # to pick up the ones pairing just wrote.
+    service = _service_module("pair")
+    try:
+        if service.service_exists():
+            service.restart_service()
+        else:
+            service.install_service()
+            if sys.platform == "win32":
+                service.start_service()
+    except Exception as error:
+        if sys.platform == "win32":
+            print("Almost done — restart the service so it picks up these credentials.")
+            print("In an Administrator Command Prompt, run:")
+            print("  eres-print-agent restart")
+        else:
+            print(f"Paired, but the background service did not start: {error}", file=sys.stderr)
+        return 0 if sys.platform == "win32" else 1
 
-    if service_exists():
-        print("Almost done — restart the service so it picks up these credentials.")
-        print("In an Administrator Command Prompt, run:")
-        print("  eres-print-agent restart")
-    else:
-        print("The background service isn't installed yet.")
-        print("In an Administrator Command Prompt, run:")
-        print("  eres-print-agent install")
+    print("ERES Print Agent is running in the background and starts by itself with this computer.")
+    print("Your printers will appear in ERES Settings > Printers within a few seconds.")
     return 0
 
 
@@ -107,24 +124,22 @@ def cmd_run(_args: argparse.Namespace) -> int:
 
 
 def cmd_install(_args: argparse.Namespace) -> int:
-    _require_windows("install")
-    from .service.windows_service import install_service
-
-    install_service()
-    print("ERES Print Agent service installed and set to start automatically.")
+    service = _service_module("install")
+    service.install_service()
+    if sys.platform == "darwin":
+        print("ERES Print Agent installed. It starts by itself when you log in.")
+    else:
+        print("ERES Print Agent service installed and set to start automatically.")
 
     config = load_config()
     if not config.is_paired:
-        print("Not paired yet — run `eres-print-agent pair <code>` from ERES Settings > Printers,")
-        print("then `eres-print-agent start`.")
+        print("Not paired yet — run `eres-print-agent pair <code>` from ERES Settings > Printers.")
     return 0
 
 
 def cmd_uninstall(_args: argparse.Namespace) -> int:
-    _require_windows("uninstall")
-    from .service.windows_service import uninstall_service
-
-    uninstall_service()
+    service = _service_module("uninstall")
+    service.uninstall_service()
     config = load_config()
     if config.agentId:
         delete_agent_secret(config.agentId)
@@ -133,28 +148,19 @@ def cmd_uninstall(_args: argparse.Namespace) -> int:
 
 
 def cmd_start(_args: argparse.Namespace) -> int:
-    _require_windows("start")
-    from .service.windows_service import start_service
-
-    start_service()
+    _service_module("start").start_service()
     print("ERES Print Agent service started.")
     return 0
 
 
 def cmd_stop(_args: argparse.Namespace) -> int:
-    _require_windows("stop")
-    from .service.windows_service import stop_service
-
-    stop_service()
+    _service_module("stop").stop_service()
     print("ERES Print Agent service stopped.")
     return 0
 
 
 def cmd_restart(_args: argparse.Namespace) -> int:
-    _require_windows("restart")
-    from .service.windows_service import restart_service
-
-    restart_service()
+    _service_module("restart").restart_service()
     print("ERES Print Agent service restarted.")
     return 0
 
@@ -250,15 +256,16 @@ def build_parser() -> argparse.ArgumentParser:
     pair_parser = subparsers.add_parser("pair", help="Redeem a pairing code from ERES Settings > Printers")
     pair_parser.add_argument("code")
     pair_parser.add_argument("--web-url", dest="web_url", default=None, help="ERES app URL (default: https://app.eres.cloud)")
+    pair_parser.add_argument("--no-service", dest="no_service", action="store_true", help="Only pair; don't start the background service")
     pair_parser.set_defaults(func=cmd_pair)
 
     subparsers.add_parser("run", help="Run in the foreground (dev/non-Windows)").set_defaults(func=cmd_run)
 
-    subparsers.add_parser("install", help="Install and start the Windows service").set_defaults(func=cmd_install)
-    subparsers.add_parser("uninstall", help="Remove the Windows service").set_defaults(func=cmd_uninstall)
-    subparsers.add_parser("start", help="Start the Windows service").set_defaults(func=cmd_start)
-    subparsers.add_parser("stop", help="Stop the Windows service").set_defaults(func=cmd_stop)
-    subparsers.add_parser("restart", help="Restart the Windows service").set_defaults(func=cmd_restart)
+    subparsers.add_parser("install", help="Install and start the background service").set_defaults(func=cmd_install)
+    subparsers.add_parser("uninstall", help="Remove the background service").set_defaults(func=cmd_uninstall)
+    subparsers.add_parser("start", help="Start the background service").set_defaults(func=cmd_start)
+    subparsers.add_parser("stop", help="Stop the background service").set_defaults(func=cmd_stop)
+    subparsers.add_parser("restart", help="Restart the background service").set_defaults(func=cmd_restart)
 
     status_parser = subparsers.add_parser("status", help="Show agent status")
     status_parser.add_argument("--json", action="store_true")

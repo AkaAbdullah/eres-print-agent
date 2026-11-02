@@ -1,4 +1,4 @@
-name: Build Windows Installer
+name: Build Installers (Windows + macOS)
 
 # Runs on a real Windows runner since PyInstaller/pywin32/Inno Setup all
 # need Windows to produce a working artifact — this can't be built on the
@@ -83,3 +83,41 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: installer/Output/ERESPrintAgentSetup.exe
+
+  # macOS: one binary per CPU (Apple Silicon on macos-14, Intel on macos-13),
+  # packed as eres-print-agent-macos-<arch>.tar.gz. ERES's one-line Mac
+  # installer (web/app/api/print-agent/install/mac) downloads the right one
+  # from the latest release.
+  build-macos:
+    strategy:
+      matrix:
+        runner: [macos-14, macos-13]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies and test
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pyinstaller
+          pytest -q
+
+      - name: Build
+        run: PYTHON=python ./scripts/build_macos.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eres-print-agent-macos-${{ matrix.runner }}
+          path: dist/eres-print-agent-macos-*.tar.gz
+          retention-days: 90
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/eres-print-agent-macos-*.tar.gz

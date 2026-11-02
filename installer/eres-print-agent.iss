@@ -9,7 +9,7 @@
 ; produces ERESPrintAgentSetup.exe.
 
 #define MyAppName "ERES Print Agent"
-#define MyAppVersion "1.0.10"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "ERES"
 #define MyAppExeName "eres-print-agent.exe"
 
@@ -53,11 +53,51 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "install"; StatusMsg: "Installing
 ; PrepareToInstall has just stopped it — so start it explicitly, or the
 ; upgrade would leave a working install sitting there stopped.
 Filename: "{app}\{#MyAppExeName}"; Parameters: "start"; StatusMsg: "Starting ERES Print Agent service..."; Flags: runhidden
+; Pairing runs from CurStepChanged below (it needs the code typed on the
+; "Connect to ERES" page and must report a failure to the user).
 
 [UninstallRun]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; RunOnceId: "StopService"; Flags: runhidden
 
 [Code]
+var
+  PairPage: TInputQueryWizardPage;
+
+// "Connect to ERES" page: the pairing code from ERES Settings > Printers.
+// Can also be passed as ERESPrintAgentSetup.exe /CODE=ABCD-EFGH. Left empty
+// (e.g. an upgrade of an already paired computer), pairing is skipped.
+procedure InitializeWizard;
+begin
+  PairPage := CreateInputQueryPage(wpSelectDir,
+    'Connect to ERES',
+    'Enter the pairing code shown in ERES',
+    'In ERES, open Settings > Printers, click "Add this computer" and choose Windows. ' +
+    'Type the 8-character code shown there. Leave it empty if this computer is already connected.');
+  PairPage.Add('Pairing code:', False);
+  PairPage.Values[0] := ExpandConstant('{param:CODE|}');
+end;
+
+function PairCode(): String;
+begin
+  Result := Uppercase(Trim(PairPage.Values[0]));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if (CurStep = ssPostInstall) and (PairCode() <> '') then
+  begin
+    WizardForm.StatusLabel.Caption := 'Connecting to ERES...';
+    // `pair` saves the credential and restarts the service itself.
+    if (not Exec(ExpandConstant('{app}\{#MyAppExeName}'), 'pair ' + PairCode(), '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
+      MsgBox('ERES Print Agent was installed, but connecting to ERES failed. ' +
+        'The code may have expired: in ERES Settings > Printers click "New pairing code", ' +
+        'then run this installer again and enter the new code.', mbError, MB_OK);
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;

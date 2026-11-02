@@ -131,7 +131,11 @@ def save_agent_secret(agent_id: str, secret: str) -> None:
     if _save_windows_secret(agent_id, secret):
         return
 
-    keyring, KeyringError = _try_keyring()
+    # macOS: a file only this user can read, like an SSH key. The Keychain
+    # ties an item to the exact binary that wrote it, so after every agent
+    # update the background service would hit a "wants to use your
+    # keychain" prompt nobody is there to answer.
+    keyring, KeyringError = (None, None) if sys.platform == "darwin" else _try_keyring()
     if keyring:
         try:
             keyring.set_password(KEYRING_SERVICE_NAME, agent_id, secret)
@@ -145,13 +149,19 @@ def save_agent_secret(agent_id: str, secret: str) -> None:
         os.chmod(_FALLBACK_PATH, stat.S_IRUSR | stat.S_IWUSR)
     except OSError:
         pass  # best-effort on platforms without POSIX permission bits (Windows ACLs differ)
-    logger.warning("Credential stored in %s (no OS keyring backend found).", _FALLBACK_PATH)
+    if sys.platform != "darwin":
+        logger.warning("Credential stored in %s (no OS keyring backend found).", _FALLBACK_PATH)
 
 
 def load_agent_secret(agent_id: str) -> Optional[str]:
     secret = _load_windows_secret(agent_id)
     if secret:
         return secret
+
+    if _FALLBACK_PATH.exists():
+        lines = _FALLBACK_PATH.read_text(encoding="utf-8").splitlines()
+        if len(lines) >= 2 and lines[0] == agent_id:
+            return lines[1]
 
     keyring, KeyringError = _try_keyring()
     if keyring:
