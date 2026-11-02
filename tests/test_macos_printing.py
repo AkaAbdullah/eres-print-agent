@@ -49,3 +49,25 @@ def test_ppd_paper_sizes(tmp_path: Path, monkeypatch):
     )
     monkeypatch.setattr(macos, "PPD_DIR", tmp_path)
     assert macos._paper_sizes("POS") == [("X48MMY210MM", 136.0, 595.0), ("X48MMY297MM", 136.0, 842.0)]
+
+
+def test_custom_length_matches_receipt():
+    from eres_print_agent.printing.macos import custom_roll_media
+
+    # 80 x 119 mm receipt on a 48 mm roll → 136 pt wide, ~203 pt long.
+    assert custom_roll_media(POS58, (136.0, 48.0, 9282.0), (227.04, 337.92)) == "Custom.136x203"
+    # Driver without custom sizes → caller falls back to the fixed sizes.
+    assert custom_roll_media(POS58, None, (227.04, 337.92)) is None
+    # Office printer → left alone.
+    assert custom_roll_media(A4, (612.0, 72.0, 1008.0), (595.0, 842.0)) is None
+
+
+def test_custom_size_range_from_ppd(tmp_path, monkeypatch):
+    (tmp_path / "POS.ppd").write_text(
+        '*CustomPageSize True: "pop"\n'
+        "*ParamCustomPageSize Width:        1 points 48 136\n"
+        "*ParamCustomPageSize Height:       2 points 48 9282\n",
+        encoding="latin-1",
+    )
+    monkeypatch.setattr(macos, "PPD_DIR", tmp_path)
+    assert macos._custom_size_range("POS") == (136.0, 48.0, 9282.0)

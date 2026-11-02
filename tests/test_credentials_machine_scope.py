@@ -31,6 +31,9 @@ def windows(monkeypatch, tmp_path):
     monkeypatch.setattr(credentials, "_try_win32crypt", lambda: fake)
     monkeypatch.setattr(credentials, "_WINDOWS_SECRET_PATH", tmp_path / "credential.dpapi")
     monkeypatch.setattr(credentials, "CONFIG_DIR", tmp_path)
+    # Without this, delete_agent_secret() removed the real
+    # ~/.eres-print-agent/credential.fallback and unpaired the dev's Mac.
+    monkeypatch.setattr(credentials, "_FALLBACK_PATH", tmp_path / "credential.fallback")
     monkeypatch.setattr(credentials, "_restrict_to_system_and_admins", lambda path: None)
     return fake
 

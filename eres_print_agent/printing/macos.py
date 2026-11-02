@@ -8,6 +8,10 @@ receipt. A 58 mm printer (48 mm printable) would cut the right side off, so
 for roll printers this scales the page down to the paper width
 (`fit-to-page`) and picks the shortest paper length from the printer's
 driver that still fits, so the printer doesn't feed a metre of blank paper.
+
+ESC/POS receipt printers skip the driver altogether: the receipt is drawn
+to a bitmap and sent raw (escpos.py), because drivers such as the generic
+POS-58 one ignore custom paper lengths.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from . import escpos
 from .base import DiscoveredPrinter, PrinterManager, PrinterStatus
 
 COMMAND_TIMEOUT_SECONDS = 20
@@ -90,6 +95,44 @@ def _paper_sizes(name: str) -> List[Tuple[str, float, float]]:
     return sizes
 
 
+def _custom_size_range(name: str) -> Optional[Tuple[float, float, float]]:
+    """(max width, min height, max height) in points when the driver accepts
+    any paper length (`*CustomPageSize True`), else None."""
+    try:
+        text = _ppd_path(name).read_text(encoding="latin-1", errors="replace")
+    except OSError:
+        return None
+    if not re.search(r"^\*CustomPageSize\s+True", text, re.MULTILINE):
+        return None
+    width = re.search(r"^\*ParamCustomPageSize\s+Width:\s*\d+\s+points\s+([\d.]+)\s+([\d.]+)", text, re.MULTILINE)
+    height = re.search(r"^\*ParamCustomPageSize\s+Height:\s*\d+\s+points\s+([\d.]+)\s+([\d.]+)", text, re.MULTILINE)
+    if not width or not height:
+        return None
+    return float(width.group(2)), float(height.group(1)), float(height.group(2))
+
+
+def custom_roll_media(
+    sizes: List[Tuple[str, float, float]],
+    custom: Optional[Tuple[float, float, float]],
+    page: Optional[Tuple[float, float]],
+) -> Optional[str]:
+    """A paper size exactly as long as the receipt once scaled to the roll's
+    width, e.g. "Custom.136x202". A fixed size (210 mm) would leave the rest
+    of the page blank above the receipt, because macOS anchors a page that
+    is shorter than the paper to the bottom."""
+    if not custom or not page or page[0] <= 0:
+        return None
+    is_roll = any(width > 0 and height / width >= _ROLL_RATIO for _choice, width, height in sizes) or (
+        custom[2] / custom[0] >= _ROLL_RATIO
+    )
+    if not is_roll:
+        return None
+    width = custom[0]
+    height = page[1] * min(1.0, width / page[0])
+    height = max(custom[1], min(custom[2], height))
+    return f"Custom.{int(round(width))}x{int(-(-height // 1))}"
+
+
 def _pdf_page_size(file_path: str) -> Optional[Tuple[float, float]]:
     """First page's MediaBox in points. ERES's PDFs (Chromium) keep it in plain text."""
     try:
@@ -117,6 +160,60 @@ def roll_media_for(sizes: List[Tuple[str, float, float]], page: Optional[Tuple[f
         if scaled_height <= height:
             return choice
     return rolls[-1][0]
+
+
+# Roll printers that speak a label language, not ESC/POS: never send them raw.
+_NOT_ESCPOS = re.compile(r"zebra|dymo|rollo|godex|\btsc\b|brother|label|zpl|epl", re.IGNORECASE)
+# Widest ESC/POS receipt paper (80 mm roll, 72 mm printable), in points.
+_MAX_RECEIPT_WIDTH_PT = 230.0
+
+
+def _ppd_text(name: str) -> str:
+    try:
+        return _ppd_path(name).read_text(encoding="latin-1", errors="replace")
+    except OSError:
+        return ""
+
+
+def escpos_width_dots(
+    ppd_text: str,
+    sizes: List[Tuple[str, float, float]],
+    custom: Optional[Tuple[float, float, float]],
+) -> Optional[int]:
+    """Printable width in printer dots when this looks like an ESC/POS
+    receipt printer (a roll no wider than 80 mm, not a label printer), else
+    None."""
+    if not ppd_text:
+        return None
+    header = " ".join(re.findall(r'^\*(?:Manufacturer|ModelName|NickName|cupsFilter2?):\s*"([^"]*)"', ppd_text, re.MULTILINE))
+    if _NOT_ESCPOS.search(header):
+        return None
+    # 2.5, not _ROLL_RATIO: an 80 mm driver's 210 mm length is only 2.9x its width.
+    rolls = [width for _choice, width, height in sizes if width > 0 and height / width >= 2.5]
+    if custom and custom[0] > 0 and custom[2] / custom[0] >= _ROLL_RATIO:
+        rolls.append(custom[0])
+    if not rolls:
+        return None
+    width_pt = max(rolls)
+    if width_pt > _MAX_RECEIPT_WIDTH_PT:
+        return None
+    match = re.search(r"^\*DefaultResolution:\s*(\d+)", ppd_text, re.MULTILINE)
+    dpi = int(match.group(1)) if match else 203
+    # 48 mm at 203 dpi is 383.4 dots; printers take whole bytes (384).
+    return max(8, int(round(width_pt / 72.0 * dpi / 8.0)) * 8)
+
+
+def build_escpos_receipt(file_path: str, width_dots: int, dpi: int = 203) -> bytes:
+    """The PDF as one ESC/POS job: each page trimmed to its ink, with
+    DEFAULT_PAD_MM of blank paper above and below, then feed and cut."""
+    from .macos_raster import render_pdf_gray
+
+    rows: List[bytes] = []
+    for gray, width, height in render_pdf_gray(file_path, width_dots):
+        rows += escpos.trim_blank_rows(escpos.gray_to_rows(gray, width, height))
+    if not rows:
+        raise RuntimeError("The receipt is blank")
+    return escpos.build_escpos_job(rows, pad_rows=escpos.mm_to_dots(escpos.DEFAULT_PAD_MM, dpi))
 
 
 class MacPrinterManager(PrinterManager):
@@ -149,7 +246,29 @@ class MacPrinterManager(PrinterManager):
 
     def print(self, local_printer_id: str, file_path: str, copies: int) -> None:
         args = ["lp", "-d", local_printer_id, "-n", str(max(1, int(copies)))]
-        media = roll_media_for(_paper_sizes(local_printer_id), _pdf_page_size(file_path))
+        sizes = _paper_sizes(local_printer_id)
+        custom = _custom_size_range(local_printer_id)
+        ppd = _ppd_text(local_printer_id)
+        width_dots = escpos_width_dots(ppd, sizes, custom)
+        if width_dots:
+            # Receipt printer: send the receipt as an ESC/POS bitmap so it is
+            # exactly as long as the receipt. macOS drivers often ignore
+            # custom paper lengths and leave blank paper above or below.
+            try:
+                match = re.search(r"^\*DefaultResolution:\s*(\d+)", ppd, re.MULTILINE)
+                data = build_escpos_receipt(file_path, width_dots, int(match.group(1)) if match else 203)
+                raw_path = f"{file_path}.escpos"
+                Path(raw_path).write_bytes(data)
+                try:
+                    result = _run(args + ["-o", "raw", raw_path], timeout=PRINT_TIMEOUT_SECONDS)
+                finally:
+                    Path(raw_path).unlink(missing_ok=True)
+                if result.returncode == 0:
+                    return
+            except Exception:  # noqa: BLE001 - fall back to the driver below
+                pass
+        page = _pdf_page_size(file_path)
+        media = custom_roll_media(sizes, custom, page) or roll_media_for(sizes, page)
         if media:
             # Roll printer: shrink an 80 mm receipt onto narrower paper.
             args += ["-o", f"media={media}", "-o", "fit-to-page"]
