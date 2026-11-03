@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Optional
 
-from ..constants import PRINTER_SYNC_INTERVAL_SECONDS
+from ..constants import PRINTER_STATUS_CHECK_SECONDS, PRINTER_SYNC_INTERVAL_SECONDS
 from ..models import AgentPrintersSync, PrinterCapabilities, SyncedPrinter
 from ..printing.base import PrinterManager
 from ..net.ws_client import WsClient
@@ -27,19 +28,27 @@ def build_sync_message(printer_manager: PrinterManager) -> AgentPrintersSync:
                     color=printer.color, duplex=printer.duplex, paperSizes=printer.paper_sizes
                 ),
                 statusDetail=printer.status_detail,
+                online=printer.online,
             )
             for printer in discovered
         ]
     )
 
 
-async def sync_now(ws_client: WsClient, printer_manager: PrinterManager) -> None:
+def _fingerprint(message: AgentPrintersSync) -> str:
+    """The message without its timestamp, to tell whether anything changed."""
+    return message.model_dump_json(exclude={"ts"})
+
+
+async def sync_now(ws_client: WsClient, printer_manager: PrinterManager) -> Optional[str]:
+    """Sends the printer list; returns its fingerprint, or None on failure."""
     try:
-        message = build_sync_message(printer_manager)
+        message = await asyncio.to_thread(build_sync_message, printer_manager)
     except Exception:
         logger.exception("Printer discovery failed")
-        return
+        return None
     await ws_client.send(message)
+    return _fingerprint(message)
 
 
 async def run_periodic_sync(
@@ -47,13 +56,31 @@ async def run_periodic_sync(
     printer_manager: PrinterManager,
     stop_event: asyncio.Event,
     interval_seconds: int = PRINTER_SYNC_INTERVAL_SECONDS,
+    check_seconds: int = PRINTER_STATUS_CHECK_SECONDS,
 ) -> None:
+    """Checks the printers every `check_seconds` and sends a sync as soon as
+    one is plugged in, unplugged or changes state, so ERES shows it within
+    about that long. An unchanged list is still re-sent every
+    `interval_seconds` as a keep-alive."""
+    last_sent: Optional[str] = None
+    last_sent_at = 0.0
+    loop = asyncio.get_running_loop()
     while not stop_event.is_set():
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            await asyncio.wait_for(stop_event.wait(), timeout=check_seconds)
         except asyncio.TimeoutError:
             pass
         if stop_event.is_set():
             break
-        if ws_client.connected.is_set():
-            await sync_now(ws_client, printer_manager)
+        if not ws_client.connected.is_set():
+            last_sent = None  # resend on reconnect
+            continue
+        try:
+            message = await asyncio.to_thread(build_sync_message, printer_manager)
+        except Exception:
+            logger.exception("Printer discovery failed")
+            continue
+        fingerprint = _fingerprint(message)
+        if fingerprint != last_sent or loop.time() - last_sent_at >= interval_seconds:
+            await ws_client.send(message)
+            last_sent, last_sent_at = fingerprint, loop.time()

@@ -70,6 +70,17 @@ _OFFLINE_STATUS_BITS = {
 }
 
 
+# "Use Printer Offline": Windows sets it on a USB printer that is unplugged
+# or switched off, without any status bit.
+_PRINTER_ATTRIBUTE_WORK_OFFLINE = 0x00000400
+
+
+def _is_online(status_bits: int, attributes: int) -> bool:
+    if attributes & _PRINTER_ATTRIBUTE_WORK_OFFLINE:
+        return False
+    return not any(status_bits & bit for bit in _OFFLINE_STATUS_BITS.values())
+
+
 def _status_detail(status_bits: int) -> str:
     if status_bits == 0:
         return "Ready"
@@ -120,7 +131,12 @@ class WindowsPrinterManager(PrinterManager):
                     is_default=(name == default_name),
                     color=color,
                     duplex=duplex,
-                    status_detail=_status_detail(entry.get("Status", 0)),
+                    status_detail=(
+                        "Not connected (unplugged, switched off or set to offline)"
+                        if entry.get("Attributes", 0) & _PRINTER_ATTRIBUTE_WORK_OFFLINE
+                        else _status_detail(entry.get("Status", 0))
+                    ),
+                    online=_is_online(entry.get("Status", 0), entry.get("Attributes", 0)),
                 )
             )
         return discovered
@@ -135,8 +151,10 @@ class WindowsPrinterManager(PrinterManager):
         try:
             info = win32print.GetPrinter(handle, 2)
             status_bits = info.get("Status", 0)
-            offline = any(status_bits & bit for bit in _OFFLINE_STATUS_BITS.values())
-            return PrinterStatus(online=not offline, detail=_status_detail(status_bits))
+            attributes = info.get("Attributes", 0)
+            if attributes & _PRINTER_ATTRIBUTE_WORK_OFFLINE:
+                return PrinterStatus(online=False, detail="Not connected (unplugged, switched off or set to offline)")
+            return PrinterStatus(online=_is_online(status_bits, 0), detail=_status_detail(status_bits))
         finally:
             win32print.ClosePrinter(handle)
 

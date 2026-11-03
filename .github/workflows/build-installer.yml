@@ -84,14 +84,14 @@ jobs:
         with:
           files: installer/Output/ERESPrintAgentSetup.exe
 
-  # macOS: one binary per CPU (Apple Silicon on macos-14, Intel on macos-13),
+  # macOS: one binary per CPU (Apple Silicon on macos-14, Intel on macos-15-intel),
   # packed as eres-print-agent-macos-<arch>.tar.gz. ERES's one-line Mac
   # installer (web/app/api/print-agent/install/mac) downloads the right one
   # from the latest release.
   build-macos:
     strategy:
       matrix:
-        runner: [macos-14, macos-13]
+        runner: [macos-14, macos-15-intel]
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4

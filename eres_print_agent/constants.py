@@ -23,6 +23,9 @@ RECONNECT_BACKOFF_SCHEDULE = [1, 2, 5, 10, 30, 60]
 
 HEARTBEAT_INTERVAL_SECONDS = 30
 PRINTER_SYNC_INTERVAL_SECONDS = 5 * 60
+# How often printers are re-checked; a change (unplugged, switched off) is
+# synced to ERES right away instead of waiting for the 5-minute sync.
+PRINTER_STATUS_CHECK_SECONDS = 20
 
 DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB — generous for a PDF, small enough to bound memory
 DOWNLOAD_TIMEOUT_SECONDS = 30

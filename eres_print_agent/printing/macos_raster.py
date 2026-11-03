@@ -40,6 +40,7 @@ def _libs():
     cg.CGContextScaleCTM.argtypes = [vp, ctypes.c_double, ctypes.c_double]
     cg.CGContextTranslateCTM.argtypes = [vp, ctypes.c_double, ctypes.c_double]
     cg.CGContextDrawPDFPage.argtypes = [vp, vp]
+    cg.CGContextSetShouldAntialias.argtypes = [vp, ctypes.c_bool]
     cg.CGContextRelease.argtypes = [vp]
     return cg, cf
 
@@ -73,6 +74,10 @@ def render_pdf_gray(file_path: str, width_px: int) -> List[Tuple[bytes, int, int
             try:
                 cg.CGContextSetGrayFillColor(ctx, 1.0, 1.0)
                 cg.CGContextFillRect(ctx, _Rect(0, 0, width_px, height_px))
+                # Hard black/white edges for text and shapes: soft grey edges
+                # get dithered into speckles, which break QR codes. Images
+                # (a logo) are unaffected and still print as shading.
+                cg.CGContextSetShouldAntialias(ctx, False)
                 cg.CGContextScaleCTM(ctx, scale, scale)
                 cg.CGContextTranslateCTM(ctx, -box.x, -box.y)
                 cg.CGContextDrawPDFPage(ctx, page)

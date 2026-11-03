@@ -24,6 +24,9 @@ class DiscoveredPrinter:
     duplex: Optional[bool] = None
     paper_sizes: Optional[List[str]] = None
     status_detail: Optional[str] = None
+    # False when the printer can't print right now (unplugged, switched off,
+    # paused, paper out). None = the platform can't tell.
+    online: Optional[bool] = None
 
 
 @dataclass

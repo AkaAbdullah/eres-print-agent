@@ -71,3 +71,22 @@ def test_custom_size_range_from_ppd(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(macos, "PPD_DIR", tmp_path)
     assert macos._custom_size_range("POS") == (136.0, 48.0, 9282.0)
+
+
+def test_usb_attached():
+    uri = "usb://GEZHI/micro-printer?serial=000000000004"
+    assert macos._usb_attached(uri, {uri})
+    assert macos._usb_attached(uri, {"usb://GEZHI/micro-printer"})  # params differ
+    assert not macos._usb_attached(uri, set())  # unplugged / switched off
+    assert macos._usb_attached(uri, None)  # couldn't check: never mark down
+    assert macos._usb_attached("ipp://192.168.1.5/ipp/print", set())  # network printer
+
+
+def test_unplugged_usb_printer_is_offline(monkeypatch):
+    monkeypatch.setattr(macos, "_printer_details", lambda name: {"state": "printer POS58 is idle.  enabled since Sat", "description": "POS-58", "connection": "direct"})
+    monkeypatch.setattr(macos, "_device_uri", lambda name: "usb://GEZHI/micro-printer?serial=000000000004")
+    monkeypatch.setattr(macos, "_attached_usb_uris", lambda: set())
+    status = macos.MacPrinterManager().get_status("POS58")
+    assert not status.online and status.detail == macos.UNPLUGGED_DETAIL
+    monkeypatch.setattr(macos, "_attached_usb_uris", lambda: {"usb://GEZHI/micro-printer?serial=000000000004"})
+    assert macos.MacPrinterManager().get_status("POS58").online

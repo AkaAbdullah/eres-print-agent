@@ -66,6 +66,45 @@ def _printer_details(name: str) -> Dict[str, str]:
     return details
 
 
+def _device_uri(name: str) -> str:
+    """`lpstat -v NAME` → the queue's device URI (usb://..., ipp://...)."""
+    result = _run(["lpstat", "-v", name])
+    match = re.search(r"^device for [^:]+:\s*(\S+)", result.stdout, re.MULTILINE)
+    return match.group(1) if match else ""
+
+
+def _attached_usb_uris() -> Optional[set]:
+    """Device URIs of the USB printers plugged in and switched on right now.
+    CUPS keeps saying "idle" for an unplugged USB printer, so this is the only
+    way to tell. None when it can't be checked (never marks a printer down)."""
+    try:
+        result = _run(["lpinfo", "--include-schemes", "usb", "-v"])
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    uris = set()
+    for line in result.stdout.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[1].strip().startswith("usb://"):
+            uris.add(parts[1].strip())
+    return uris
+
+
+def _usb_attached(uri: str, attached: Optional[set]) -> bool:
+    """False only for a USB printer that is known not to be plugged in."""
+    if not uri.startswith("usb://") or attached is None:
+        return True
+    if uri in attached:
+        return True
+    # Same printer, query parameters in another order or missing.
+    base = uri.split("?", 1)[0]
+    return any(item.split("?", 1)[0] == base for item in attached)
+
+
+UNPLUGGED_DETAIL = "Not connected (unplugged or switched off)"
+
+
 def _status_from_state(state_line: str) -> PrinterStatus:
     text = state_line.lower()
     if "disabled" in text:
@@ -220,9 +259,12 @@ class MacPrinterManager(PrinterManager):
     def discover(self) -> List[DiscoveredPrinter]:
         default_name = _default_printer()
         printers: List[DiscoveredPrinter] = []
+        attached = _attached_usb_uris()
         for name in _printer_names():
             details = _printer_details(name)
             status = _status_from_state(details["state"])
+            if status.online and not _usb_attached(_device_uri(name), attached):
+                status = PrinterStatus(online=False, detail=UNPLUGGED_DETAIL)
             sizes = _paper_sizes(name)
             printers.append(
                 DiscoveredPrinter(
@@ -234,6 +276,7 @@ class MacPrinterManager(PrinterManager):
                     is_default=(name == default_name),
                     paper_sizes=[choice for choice, _w, _h in sizes] or None,
                     status_detail=status.detail,
+                    online=status.online,
                 )
             )
         return printers
@@ -242,7 +285,10 @@ class MacPrinterManager(PrinterManager):
         details = _printer_details(local_printer_id)
         if not details["state"]:
             return PrinterStatus(online=False, detail="Printer not found on this Mac")
-        return _status_from_state(details["state"])
+        status = _status_from_state(details["state"])
+        if status.online and not _usb_attached(_device_uri(local_printer_id), _attached_usb_uris()):
+            return PrinterStatus(online=False, detail=UNPLUGGED_DETAIL)
+        return status
 
     def print(self, local_printer_id: str, file_path: str, copies: int) -> None:
         args = ["lp", "-d", local_printer_id, "-n", str(max(1, int(copies)))]

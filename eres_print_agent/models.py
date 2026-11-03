@@ -54,6 +54,9 @@ class SyncedPrinter(BaseModel):
     isDefault: Optional[bool] = None
     capabilities: Optional[PrinterCapabilities] = None
     statusDetail: Optional[str] = None
+    # Older ERES servers ignore it; newer ones show the printer as
+    # Disconnected when it's False.
+    online: Optional[bool] = None
 
 
 class AgentPrintersSync(BaseModel):
