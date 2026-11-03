@@ -42,10 +42,20 @@ def memory_mb() -> Optional[float]:
                     ("PeakPagefileUsage", ctypes.c_size_t),
                 ]
 
+            # Types declared explicitly: left to ctypes' defaults, the 64-bit
+            # process handle is passed as a 32-bit int and the call fails.
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+            kernel32.GetCurrentProcess.argtypes = []
+            # K32GetProcessMemoryInfo lives in kernel32 itself (Windows 7+),
+            # so there's no dependency on psapi.dll.
+            get_info = kernel32.K32GetProcessMemoryInfo
+            get_info.restype = wintypes.BOOL
+            get_info.argtypes = [wintypes.HANDLE, ctypes.POINTER(_Counters), wintypes.DWORD]
+
             counters = _Counters()
             counters.cb = ctypes.sizeof(_Counters)
-            handle = ctypes.windll.kernel32.GetCurrentProcess()
-            if not ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+            if not get_info(kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
                 return None
             return counters.WorkingSetSize / (1024 * 1024)
         if os.path.exists("/proc/self/statm"):
