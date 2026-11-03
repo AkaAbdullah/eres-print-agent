@@ -34,10 +34,20 @@ class AgentAuthenticate(BaseModel):
     protocolVersion: Optional[int] = None
 
 
+class AgentUsage(BaseModel):
+    """The agent's own CPU (percent of one core) and memory, for the usage
+    charts in ERES Settings > Printers."""
+
+    cpuPercent: Optional[float] = None
+    memoryMb: Optional[float] = None
+
+
 class AgentHeartbeat(BaseModel):
     type: Literal["agent.heartbeat"] = "agent.heartbeat"
     ts: str = Field(default_factory=now_iso)
     queueDepth: Optional[int] = None
+    # Agent 1.1.3+, about once a minute (not every heartbeat). Older hubs drop it.
+    usage: Optional[AgentUsage] = None
 
 
 class PrinterCapabilities(BaseModel):

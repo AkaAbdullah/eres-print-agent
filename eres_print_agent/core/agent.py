@@ -18,9 +18,11 @@ from .. import __version__
 from ..config import AgentConfig, CONFIG_DIR, DB_PATH
 from ..constants import HEARTBEAT_INTERVAL_SECONDS
 from ..db.queue_store import QueueStore
+from ..metrics import UsageSampler
 from ..models import (
     AgentAuthenticated,
     AgentHeartbeat,
+    AgentUsage,
     InboundHubMessage,
     PrintJobCancel,
     PrintJobDispatch,
@@ -47,6 +49,8 @@ class Agent:
         self.agent_secret = agent_secret
         self.stop_event = asyncio.Event()
         self._heartbeat_interval_seconds = HEARTBEAT_INTERVAL_SECONDS
+        self._usage_sampler = UsageSampler()
+        self._last_usage_at = 0.0
         self._tenant_id: str | None = None
         self._site_id: str | None = None
 
@@ -142,8 +146,24 @@ class Agent:
             if self.stop_event.is_set():
                 break
             if self.ws_client.connected.is_set():
-                await self.ws_client.send(AgentHeartbeat(queueDepth=self.job_worker.active_count))
+                await self.ws_client.send(
+                    AgentHeartbeat(queueDepth=self.job_worker.active_count, usage=await self._usage_if_due())
+                )
                 self._write_status_snapshot(connection="connected")
+
+    async def _usage_if_due(self) -> "AgentUsage | None":
+        """CPU/memory for the ERES usage charts, at most once every 55s
+        (heartbeats are every 30s; one point a minute is plenty)."""
+        now = asyncio.get_running_loop().time()
+        if now - self._last_usage_at < 55:
+            return None
+        self._last_usage_at = now
+        try:
+            cpu, memory = await asyncio.to_thread(self._usage_sampler.sample)
+        except Exception:
+            logger.debug("usage sample failed", exc_info=True)
+            return None
+        return AgentUsage(cpuPercent=cpu, memoryMb=memory)
 
     async def run(self) -> None:
         logger.info("ERES Print Agent %s starting (agentId=%s)", __version__, self.config.agentId)
